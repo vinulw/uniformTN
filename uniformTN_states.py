@@ -72,6 +72,11 @@ class stateAnsatz(ABC):
 
         if projectionMetric is not None:
             gradEvaluater.projectTangentSpace(projectionMetric)
+        # print(np.einsum('ijk,ijk',gradEvaluater.grad,gradEvaluater.grad.conj()))
+        # print(np.einsum('ijk,ijk',gradEvaluater.grad[1],gradEvaluater.grad[1].conj()))
+        # print(np.einsum('ijk,ijk',gradEvaluater.grad[2],gradEvaluater.grad[2].conj()))
+        # print(np.einsum('ijk,ijk',gradEvaluater.grad['mps'],gradEvaluater.grad['mps'].conj()))
+        # print(np.einsum('ijkl,ijkl',gradEvaluater.grad['mpo'],gradEvaluater.grad['mpo'].conj()))
 
         self.shiftTensors(-learningRate,gradEvaluater.grad)
         self.norm()
@@ -127,6 +132,7 @@ class uMPS_1d_left(uMPS_1d):
         del self.R
     def norm(self):
         self.mps = polarDecomp(self.mps.reshape(2*self.D,self.D)).reshape(2,self.D,self.D)
+
 
 class uMPS_1d_right(uMPS_1d):
     def randoInit(self):
@@ -250,6 +256,15 @@ class uMPSU1_2d_left(uMPSU_2d):
         self.mps = polarDecomp(self.mps.reshape(2*self.D_mps,self.D_mps)).reshape(2,self.D_mps,self.D_mps)
         self.mpo = np.einsum('iajb->ijab',polarDecomp(np.einsum('ijab->iajb',self.mpo).reshape(2*self.D_mpo,2*self.D_mpo)).reshape(2,self.D_mpo,2,self.D_mpo))
 
+    #for PXP model and cross like Hamiltonians. Refactor transfer/fixed point construction to be more general later...
+    def get_transfers_len3(self):
+        self.Tb3 = mpsu1Transfer_left_threeLayer(self.mps,self.mpo,self.T)
+    def get_fixedPoints_len3(self):
+        self.RRR = self.Tb3.findRightEig()
+        self.RRR.norm_pairedCanon()
+    def get_inverses_len3(self):
+        self.Tb3_inv = inverseTransfer_left(self.Tb3,self.RRR.vector)
+
 class uMPSU1_2d_left_twoSite(uMPSU1_2d_left):
     def randoInit(self):
         self.mps = randoUnitary(4*self.D_mps,self.D_mps).reshape(2,2,self.D_mps,self.D_mps)
@@ -263,19 +278,6 @@ class uMPSU1_2d_left_twoSite(uMPSU1_2d_left):
         super().load(filename)
         self.D_mps = np.size(self.mps,axis=2)
         self.D_mpo = np.size(self.mpo,axis=4)
-
-
-class uMPSU1_2d_left_twoSite_staircase(uMPSU1_2d_left_twoSite):
-    def get_transfers(self):
-        self.Ta = mpsTransfer_twoSite(self.mps)
-        T = self.Ta.findRightEig()
-        T.norm_pairedCanon()
-        self.Tb = mpsu1Transfer_left_oneLayer_twoSite_staircase(self.mps,self.mpo,T)
-        self.Tb2 = mpsu1Transfer_left_twoLayer_twoSite_staircase(self.mps,self.mpo,T)
-    def get_inverses(self):
-        self.Ta_inv = inverseTransfer_left(self.Ta,self.T.vector)
-        self.Tb_inv = inverseTransfer_left(self.Tb,self.R.vector)
-        self.Tb2_inv = inverseTransfer_leftPlusTwoPhysical(self.Tb2,self.RR.vector)
 
 class uMPSU1_2d_left_twoSite_square(uMPSU1_2d_left_twoSite):
     def get_transfers(self):
@@ -380,6 +382,22 @@ class uMPSU1_2d_left_bipartite(uMPSU1_2d_left_multipleTensors):
         self.Tb[2] = mpsu1Transfer_left_oneLayerBip(self.mps[2],self.mps[1],self.mpo[2],self.mpo[1],T2,T1)
         self.Tb2[1] = mpsu1Transfer_left_twoLayerBip(self.mps[1],self.mps[2],self.mpo[1],self.mpo[2],T1,T2)
         self.Tb2[2] = mpsu1Transfer_left_twoLayerBip(self.mps[2],self.mps[1],self.mpo[2],self.mpo[1],T2,T1)
+
+    #for PXP model and cross like Hamiltonians. Refactor transfer/fixed point construction to be more general later...
+    def get_transfers_len3(self):
+        self.Tb3 = dict()
+        self.Tb3[1] = mpsu1Transfer_left_threeLayerBip(self.mps[1],self.mps[2],self.mpo[1],self.mpo[2],self.T[1],self.T[2])
+        self.Tb3[2] = mpsu1Transfer_left_threeLayerBip(self.mps[2],self.mps[1],self.mpo[2],self.mpo[1],self.T[2],self.T[1])
+    def get_fixedPoints_len3(self):
+        self.RRR = dict()
+        self.RRR[1] = self.Tb3[1].findRightEig()
+        self.RRR[2] = self.Tb3[2].findRightEig()
+        self.RRR[1].norm_pairedCanon()
+        self.RRR[2].norm_pairedCanon()
+    def get_inverses_len3(self):
+        self.Tb3_inv = dict()
+        self.Tb3_inv[1] = inverseTransfer_left(self.Tb3[1],self.RRR[1].vector)
+        self.Tb3_inv[2] = inverseTransfer_left(self.Tb3[2],self.RRR[2].vector)
 
 class uMPSU1_2d_left_fourSite_sep(uMPSU1_2d_left_multipleTensors):
     def __init__(self,D_mps,D_mpo,mps=None,mpo=None):
